@@ -26,8 +26,13 @@ export default function App() {
 
   return (
     <div className="relative w-full min-h-dvh bg-surface overflow-hidden">
-      {/* 3D Ocean Background */}
-      <OceanScene sunElevation={2} sunAzimuth={180} />
+      {/* 3D Ocean Background — reacts to audio data */}
+      <OceanScene
+        progress={progress}
+        bass={bass}
+        treble={treble}
+        isPlaying={isPlaying}
+      />
 
       {/* Debug overlay — real-time analysis data */}
       {audioFile && (
