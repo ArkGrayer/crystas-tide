@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+/* ── Design Tokens ── */
+@theme {
+  --font-sans: 'Inter', 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Outfit', 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  --color-glass: rgba(255, 255, 255, 0.06);
+  --color-glass-border: rgba(255, 255, 255, 0.12);
+  --color-glass-hover: rgba(255, 255, 255, 0.10);
+  --color-glass-active: rgba(255, 255, 255, 0.15);
+
+  --color-ocean-50: #e0f7fa;
+  --color-ocean-100: #b2ebf2;
+  --color-ocean-200: #80deea;
+  --color-ocean-300: #4dd0e1;
+  --color-ocean-400: #26c6da;
+  --color-ocean-500: #00bcd4;
+  --color-ocean-600: #00acc1;
+  --color-ocean-700: #0097a7;
+  --color-ocean-800: #00838f;
+  --color-ocean-900: #006064;
+
+  --color-surface: #0c0e14;
+  --color-surface-elevated: #12151e;
+}
+
+/* ── Global Styles ── */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-surface);
+  color: #e2e8f0;
+  overflow: hidden;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+/* ── Glassmorphism Utility (Liquid Glass) ── */
+@utility glass {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.37),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(25px) saturate(1.8);
+  -webkit-backdrop-filter: blur(25px) saturate(1.8);
+}
+
+@utility perspective-1000 {
+  perspective: 1000px;
+}
+
+/* ── Scrollbar Styling ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+
+/* ── Selection ── */
+::selection {
+  background: rgba(0, 188, 212, 0.3);
+  color: #fff;
+}
