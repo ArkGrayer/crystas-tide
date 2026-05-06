@@ -55,6 +55,7 @@ uniform vec3 uSunPosition;
 uniform vec3 uDeepColor;
 uniform vec3 uShallowColor;
 uniform vec3 uSkyColor;
+uniform vec3 uSunColor;
 
 varying vec3 vWorldPos;
 varying vec3 vWorldNormal;
@@ -81,7 +82,7 @@ void main() {
   float specHard = pow(max(dot(N, H), 0.0), 256.0);
   float specMed  = pow(max(dot(N, H), 0.0), 32.0);
   float specSoft = pow(max(dot(N, H), 0.0), 8.0);
-  color += vec3(1.0, 0.95, 0.85) * (specHard * 3.0 + specMed * 0.5 + specSoft * 0.15);
+  color += uSunColor * (specHard * 3.0 + specMed * 0.5 + specSoft * 0.15);
 
   // Distance fog
   float dist = length(vWorldPos - cameraPosition);

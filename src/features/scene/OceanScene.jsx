@@ -1,10 +1,9 @@
 import { useRef, useMemo, useEffect } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Sky } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { oceanVertexShader, oceanFragmentShader } from './shaders/ocean'
-import VolumetricClouds from './VolumetricClouds'
+import { skyVertexShader, skyFragmentShader } from './shaders/sky'
 
 // ─── Helpers ────────────────────────────────────────────────────
 function lerp(a, b, t) {
@@ -16,11 +15,11 @@ const _sunPos = new THREE.Vector3()
 
 // Sun arc: rises left, peaks center, sets right — ALWAYS above horizon
 function computeSunPosition(progress) {
-  const elevation = 3 + 32 * Math.sin(progress * Math.PI)
-  const azimuth = 210 + progress * 120
+  const elevation = -6 + 28 * Math.sin(progress * Math.PI)
+  const azimuth = 240 + progress * 60
   const phi = THREE.MathUtils.degToRad(90 - elevation)
   const theta = THREE.MathUtils.degToRad(azimuth)
-  const r = 400
+  const r = 5000
   _sunPos.set(
     Math.sin(phi) * Math.cos(theta) * r,
     Math.cos(phi) * r,
@@ -53,6 +52,7 @@ function Ocean({ analysisRef, isPlaying }) {
     uDeepColor: { value: new THREE.Color(0x001020) },
     uShallowColor: { value: new THREE.Color(0x0090b0) },
     uSkyColor: { value: new THREE.Color(0x6699bb) },
+    uSunColor: { value: new THREE.Color('#fff5e0') },
   }), [])
 
   const material = useMemo(
@@ -86,6 +86,7 @@ function Ocean({ analysisRef, isPlaying }) {
 
     smoothProgress.current = lerp(smoothProgress.current, progress, 0.03)
     uniforms.uSunPosition.value.copy(computeSunPosition(smoothProgress.current))
+    uniforms.uSunColor.value.copy(getSunColor(smoothProgress.current))
 
     // Sky color & water color shift with daylight
     const dl = getDaylightFactor(smoothProgress.current)
@@ -107,57 +108,139 @@ function Ocean({ analysisRef, isPlaying }) {
   return <mesh geometry={geometry} material={material} />
 }
 
+// ─── Color Keyframes ─────────────────────────────────────────────
+const SUN_COLOR_KEYFRAMES = [
+  { t: 0.0,  color: new THREE.Color('#1a0a2e') },
+  { t: 0.12, color: new THREE.Color('#ff6030') },
+  { t: 0.25, color: new THREE.Color('#ffb060') },
+  { t: 0.5,  color: new THREE.Color('#fff5e0') },
+  { t: 0.75, color: new THREE.Color('#ff8040') },
+  { t: 0.88, color: new THREE.Color('#cc3020') },
+  { t: 1.0,  color: new THREE.Color('#0a0520') },
+]
+
+const HEMI_SKY_KEYFRAMES = [
+  { t: 0.0,  color: new THREE.Color('#1a0a2e') },
+  { t: 0.15, color: new THREE.Color('#ff7030') },
+  { t: 0.3,  color: new THREE.Color('#ffe0a0') },
+  { t: 0.5,  color: new THREE.Color('#fff8f0') },
+  { t: 0.7,  color: new THREE.Color('#ff9050') },
+  { t: 0.85, color: new THREE.Color('#cc4020') },
+  { t: 1.0,  color: new THREE.Color('#0a0520') },
+]
+
+const HEMI_GROUND_KEYFRAMES = [
+  { t: 0.0,  color: new THREE.Color('#050210') },
+  { t: 0.15, color: new THREE.Color('#301008') },
+  { t: 0.5,  color: new THREE.Color('#183040') },
+  { t: 1.0,  color: new THREE.Color('#020108') },
+]
+
+const SKY_TOP_KEYFRAMES = [
+  { t: 0.0,  color: new THREE.Color('#050210') },
+  { t: 0.15, color: new THREE.Color('#101530') },
+  { t: 0.3,  color: new THREE.Color('#1a4070') },
+  { t: 0.5,  color: new THREE.Color('#2060a0') },
+  { t: 0.7,  color: new THREE.Color('#1a3060') },
+  { t: 0.85, color: new THREE.Color('#0a0520') },
+  { t: 1.0,  color: new THREE.Color('#050210') },
+]
+
+const _tmpColor = new THREE.Color()
+function lerpColorKeyframes(keyframes, t) {
+  const p = THREE.MathUtils.clamp(t, 0, 1)
+  for (let i = 0; i < keyframes.length - 1; i++) {
+    const a = keyframes[i]
+    const b = keyframes[i + 1]
+    if (p >= a.t && p <= b.t) {
+      const local = (p - a.t) / (b.t - a.t)
+      _tmpColor.lerpColors(a.color, b.color, local)
+      return _tmpColor
+    }
+  }
+  return keyframes[keyframes.length - 1].color
+}
+
+function getSunColor(progress) {
+  return lerpColorKeyframes(SUN_COLOR_KEYFRAMES, progress)
+}
+
 // ─── Reactive Sky ───────────────────────────────────────────────
 function SunsetSky({ analysisRef }) {
-  const skyRef = useRef()
+  const materialRef = useRef()
   const smoothP = useRef(0)
 
-  useFrame(() => {
-    if (!skyRef.current) return
+  const uniforms = useMemo(() => ({
+    uTime: { value: 0 },
+    uProgress: { value: 0 },
+    uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+    uSunGlow: { value: 0 },
+    uSkyTop: { value: new THREE.Color() },
+    uSkyHorizon: { value: new THREE.Color() },
+    uSunColor: { value: new THREE.Color() }
+  }), [])
+
+  useFrame((state, delta) => {
+    if (!materialRef.current) return
     const progress = analysisRef.current.progress
     smoothP.current = lerp(smoothP.current, progress, 0.03)
     const p = smoothP.current
-    const dl = getDaylightFactor(p)
-    const golden = (p < 0.15 || p > 0.85)
-    const u = skyRef.current.material.uniforms
-
-    u.sunPosition.value.copy(computeSunPosition(p))
-    u.turbidity.value = golden ? 12 : lerp(3, 8, 1 - dl)
-    u.rayleigh.value = golden ? 3.5 : lerp(1, 2.5, dl)
-    u.mieCoefficient.value = golden ? 0.012 : 0.005
-    u.mieDirectionalG.value = golden ? 0.95 : 0.8
+    
+    const u = materialRef.current.uniforms
+    u.uTime.value += delta
+    u.uProgress.value = p
+    
+    const sunPos = computeSunPosition(p)
+    const sunDir = sunPos.clone().normalize()
+    u.uSunDir.value.copy(sunDir)
+    
+    u.uSunGlow.value = THREE.MathUtils.smoothstep(sunDir.y, -0.08, 0.08)
+    
+    u.uSkyTop.value.copy(lerpColorKeyframes(SKY_TOP_KEYFRAMES, p))
+    u.uSkyHorizon.value.copy(lerpColorKeyframes(HEMI_SKY_KEYFRAMES, p))
+    u.uSunColor.value.copy(getSunColor(p))
   })
 
   return (
-    <Sky ref={skyRef} distance={450000} sunPosition={[0, 1, 0]}
-      turbidity={10} rayleigh={2} mieCoefficient={0.005} mieDirectionalG={0.8} />
+    <mesh position={[0, 0, -2000]} scale={[10000, 10000, 1]} renderOrder={-1}>
+      <planeGeometry args={[1, 1]} />
+      <shaderMaterial
+        ref={materialRef}
+        vertexShader={skyVertexShader}
+        fragmentShader={skyFragmentShader}
+        uniforms={uniforms}
+        depthTest={false}
+        depthWrite={false}
+        side={THREE.FrontSide}
+      />
+    </mesh>
   )
 }
 
 // ─── Dynamic Lighting ───────────────────────────────────────────
 function SceneLighting({ analysisRef }) {
-  const ambientRef = useRef()
-  const dirRef = useRef()
+  const hemiRef = useRef()
   const smoothP = useRef(0)
   const { gl } = useThree()
 
   useFrame(() => {
     const progress = analysisRef.current.progress
     smoothP.current = lerp(smoothP.current, progress, 0.03)
-    const dl = getDaylightFactor(smoothP.current)
+    const p = smoothP.current
+    const dl = getDaylightFactor(p)
 
-    if (ambientRef.current) ambientRef.current.intensity = 0.15 + dl * 0.45
-    if (dirRef.current) {
-      dirRef.current.position.copy(computeSunPosition(smoothP.current))
-      dirRef.current.intensity = 0.3 + dl * 0.8
+    if (hemiRef.current) {
+      hemiRef.current.intensity = 0.4 + dl * 0.5
+      hemiRef.current.color.copy(lerpColorKeyframes(HEMI_SKY_KEYFRAMES, p))
+      hemiRef.current.groundColor.copy(lerpColorKeyframes(HEMI_GROUND_KEYFRAMES, p))
     }
-    gl.toneMappingExposure = 0.35 + dl * 0.35
+    gl.toneMappingExposure = 0.28 + dl * 0.32
   })
 
   return (
     <>
-      <ambientLight ref={ambientRef} intensity={0.3} />
-      <directionalLight ref={dirRef} position={[0, 100, 0]} intensity={0.5} color="#ffe0b2" />
+      <ambientLight intensity={0.15} />
+      <hemisphereLight ref={hemiRef} position={[0, 100, 0]} />
     </>
   )
 }
@@ -167,13 +250,12 @@ export default function OceanScene({ analysisRef, isPlaying = false }) {
   return (
     <Canvas
       className="!absolute inset-0 z-0"
-      camera={{ position: [0, 22, 45], rotation: [-0.08, 0, 0], fov: 55, near: 1, far: 20000 }}
+      camera={{ position: [0, 22, 45], rotation: [0, 0, 0], fov: 55, near: 1, far: 20000 }}
       gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.45 }}
     >
       <SunsetSky analysisRef={analysisRef} />
       <Ocean analysisRef={analysisRef} isPlaying={isPlaying} />
       <SceneLighting analysisRef={analysisRef} />
-      <VolumetricClouds />
 
       <EffectComposer>
         <Bloom luminanceThreshold={1.1} luminanceSmoothing={0.4} intensity={0.4} radius={0.5} mipmapBlur />
