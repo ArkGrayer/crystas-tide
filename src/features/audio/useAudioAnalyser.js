@@ -26,11 +26,15 @@ function averageRange(dataArray, start, end) {
 export function useAudioAnalyser() {
   const [audioFile, setAudioFile] = useState(null)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [analysisData, setAnalysisData] = useState({
-    progress: 0,
-    bass: 0,
-    treble: 0,
-  })
+
+  // Use a ref for the high-frequency analysis data to avoid re-renders
+  // Only the ref is updated at 60fps; React state is NOT touched per frame
+  const analysisRef = useRef({ progress: 0, bass: 0, treble: 0 })
+
+  // Snapshot state — updated at a throttled rate for any UI that needs React state
+  const [analysisSnapshot, setAnalysisSnapshot] = useState({ progress: 0, bass: 0, treble: 0 })
+  const lastSnapshotTime = useRef(0)
+  const SNAPSHOT_INTERVAL = 250 // ms — update React state at most 4x/s for debug UI
 
   const audioContextRef = useRef(null)
   const analyserRef = useRef(null)
@@ -69,10 +73,13 @@ export function useAudioAnalyser() {
 
     dataArrayRef.current = null
     setIsPlaying(false)
-    setAnalysisData({ progress: 0, bass: 0, treble: 0 })
+    analysisRef.current = { progress: 0, bass: 0, treble: 0 }
+    setAnalysisSnapshot({ progress: 0, bass: 0, treble: 0 })
   }, [])
 
   // The analysis loop — runs every frame via requestAnimationFrame
+  // CRITICAL: We write to a REF, not to setState, to avoid creating
+  // new objects + re-renders 60 times per second (the root cause of the memory leak)
   const tick = useCallback(() => {
     const analyser = analyserRef.current
     const audio = audioElementRef.current
@@ -89,7 +96,18 @@ export function useAudioAnalyser() {
     const bass = averageRange(dataArray, BASS_LOW, BASS_HIGH)
     const treble = averageRange(dataArray, TREBLE_LOW, TREBLE_HIGH)
 
-    setAnalysisData({ progress, bass, treble })
+    // Mutate the ref directly — zero allocations, zero re-renders
+    const data = analysisRef.current
+    data.progress = progress
+    data.bass = bass
+    data.treble = treble
+
+    // Throttled snapshot for debug UI (only updates React state 4x per second)
+    const now = performance.now()
+    if (now - lastSnapshotTime.current > SNAPSHOT_INTERVAL) {
+      lastSnapshotTime.current = now
+      setAnalysisSnapshot({ progress, bass, treble })
+    }
 
     rafIdRef.current = requestAnimationFrame(tick)
   }, [])
@@ -129,7 +147,8 @@ export function useAudioAnalyser() {
           cancelAnimationFrame(rafIdRef.current)
           rafIdRef.current = null
         }
-        setAnalysisData((prev) => ({ ...prev, progress: 1 }))
+        analysisRef.current.progress = 1
+        setAnalysisSnapshot((prev) => ({ ...prev, progress: 1 }))
       })
     },
     [cleanup]
@@ -184,7 +203,8 @@ export function useAudioAnalyser() {
     if (!audio) return
 
     audio.currentTime = 0
-    setAnalysisData((prev) => ({ ...prev, progress: 0 }))
+    analysisRef.current.progress = 0
+    setAnalysisSnapshot((prev) => ({ ...prev, progress: 0 }))
   }, [])
 
   // Cleanup on unmount
@@ -195,9 +215,12 @@ export function useAudioAnalyser() {
   return {
     audioFile,
     isPlaying,
-    progress: analysisData.progress,
-    bass: analysisData.bass,
-    treble: analysisData.treble,
+    // The ref — for high-frequency consumers (3D scene reads this directly, no re-renders)
+    analysisRef,
+    // Snapshot — for React UI (debug overlay, progress bar)
+    progress: analysisSnapshot.progress,
+    bass: analysisSnapshot.bass,
+    treble: analysisSnapshot.treble,
     loadFile,
     play,
     pause,

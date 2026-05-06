@@ -1,29 +1,32 @@
-import { useRef, useMemo, useEffect, useState } from 'react'
+import { useRef, useMemo, useEffect } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Sky } from '@react-three/drei'
-import { EffectComposer, Bloom, GodRays } from '@react-three/postprocessing'
-import { BlendFunction, KernelSize } from 'postprocessing'
+import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { oceanVertexShader, oceanFragmentShader } from './shaders/ocean'
+import VolumetricClouds from './VolumetricClouds'
 
 // ─── Helpers ────────────────────────────────────────────────────
 function lerp(a, b, t) {
   return a + (b - a) * t
 }
 
+// Reusable Vector3 — avoids allocations inside useFrame
+const _sunPos = new THREE.Vector3()
+
 // Sun arc: rises left, peaks center, sets right — ALWAYS above horizon
 function computeSunPosition(progress) {
   const elevation = 3 + 32 * Math.sin(progress * Math.PI)
-  // Azimuth 210→330: sweeps left-to-right in front of camera
   const azimuth = 210 + progress * 120
   const phi = THREE.MathUtils.degToRad(90 - elevation)
   const theta = THREE.MathUtils.degToRad(azimuth)
   const r = 400
-  return new THREE.Vector3(
+  _sunPos.set(
     Math.sin(phi) * Math.cos(theta) * r,
     Math.cos(phi) * r,
     Math.sin(phi) * Math.sin(theta) * r
   )
+  return _sunPos
 }
 
 function getDaylightFactor(progress) {
@@ -31,7 +34,7 @@ function getDaylightFactor(progress) {
 }
 
 // ─── Ocean with Vertex Displacement ─────────────────────────────
-function Ocean({ audioDataRef }) {
+function Ocean({ analysisRef, isPlaying }) {
   const smoothBass = useRef(0)
   const smoothTreble = useRef(0)
   const smoothProgress = useRef(0)
@@ -64,7 +67,11 @@ function Ocean({ audioDataRef }) {
   )
 
   useFrame((_, delta) => {
-    const { bass, treble, isPlaying, progress } = audioDataRef.current
+    // Read directly from the ref — no intermediate sync, no re-renders
+    const bass = analysisRef.current.bass
+    const treble = analysisRef.current.treble
+    const progress = analysisRef.current.progress
+
     uniforms.uTime.value += delta
 
     const tgtBass = isPlaying ? bass : 0
@@ -101,13 +108,13 @@ function Ocean({ audioDataRef }) {
 }
 
 // ─── Reactive Sky ───────────────────────────────────────────────
-function SunsetSky({ audioDataRef }) {
+function SunsetSky({ analysisRef }) {
   const skyRef = useRef()
   const smoothP = useRef(0)
 
   useFrame(() => {
     if (!skyRef.current) return
-    const { progress } = audioDataRef.current
+    const progress = analysisRef.current.progress
     smoothP.current = lerp(smoothP.current, progress, 0.03)
     const p = smoothP.current
     const dl = getDaylightFactor(p)
@@ -127,46 +134,15 @@ function SunsetSky({ audioDataRef }) {
   )
 }
 
-// ─── Sun Sphere (shared via callback ref for GodRays) ───────────
-function SunMesh({ audioDataRef, onReady }) {
-  const meshRef = useRef()
-  const smoothP = useRef(0)
-
-  useEffect(() => {
-    if (meshRef.current) onReady(meshRef.current)
-  }, [onReady])
-
-  useFrame(() => {
-    if (!meshRef.current) return
-    const { progress } = audioDataRef.current
-    smoothP.current = lerp(smoothP.current, progress, 0.03)
-    meshRef.current.position.copy(computeSunPosition(smoothP.current))
-
-    const dl = getDaylightFactor(smoothP.current)
-    const golden = (smoothP.current < 0.15 || smoothP.current > 0.85)
-    const r = golden ? 1.4 : 0.95 + dl * 0.35
-    const g = golden ? 0.75 : 0.85 + dl * 0.25
-    const b = golden ? 0.3 : 0.7 + dl * 0.3
-    meshRef.current.material.color.setRGB(r, g, b)
-  })
-
-  return (
-    <mesh ref={meshRef}>
-      <sphereGeometry args={[10, 32, 32]} />
-      <meshBasicMaterial toneMapped={false} color={[1.2, 0.9, 0.5]} />
-    </mesh>
-  )
-}
-
 // ─── Dynamic Lighting ───────────────────────────────────────────
-function SceneLighting({ audioDataRef }) {
+function SceneLighting({ analysisRef }) {
   const ambientRef = useRef()
   const dirRef = useRef()
   const smoothP = useRef(0)
   const { gl } = useThree()
 
   useFrame(() => {
-    const { progress } = audioDataRef.current
+    const progress = analysisRef.current.progress
     smoothP.current = lerp(smoothP.current, progress, 0.03)
     const dl = getDaylightFactor(smoothP.current)
 
@@ -186,67 +162,21 @@ function SceneLighting({ audioDataRef }) {
   )
 }
 
-// ─── Cloud Layer ────────────────────────────────────────────────
-function CloudLayer() {
-  const clouds = useMemo(() => [
-    { pos: [-120, 70, -400], scale: [80, 12, 30] },
-    { pos: [60, 85, -450], scale: [100, 14, 35] },
-    { pos: [-30, 60, -500], scale: [70, 10, 25] },
-    { pos: [180, 75, -380], scale: [90, 13, 30] },
-    { pos: [-200, 65, -420], scale: [75, 11, 28] },
-    { pos: [250, 80, -470], scale: [85, 12, 32] },
-    { pos: [-60, 90, -520], scale: [110, 15, 40] },
-  ], [])
-
-  return (
-    <group>
-      {clouds.map((c, i) => (
-        <mesh key={i} position={c.pos} scale={c.scale}>
-          <sphereGeometry args={[1, 16, 12]} />
-          <meshBasicMaterial color="#e8e0d8" transparent opacity={0.25} depthWrite={false} />
-        </mesh>
-      ))}
-    </group>
-  )
-}
-
 // ─── Main Scene ─────────────────────────────────────────────────
-export default function OceanScene({ progress = 0, bass = 0, treble = 0, isPlaying = false }) {
-  const audioDataRef = useRef({ progress, bass, treble, isPlaying })
-  const [sunMesh, setSunMesh] = useState(null)
-
-  useEffect(() => {
-    audioDataRef.current = { progress, bass, treble, isPlaying }
-  }, [progress, bass, treble, isPlaying])
-
+export default function OceanScene({ analysisRef, isPlaying = false }) {
   return (
     <Canvas
       className="!absolute inset-0 z-0"
       camera={{ position: [0, 22, 45], rotation: [-0.08, 0, 0], fov: 55, near: 1, far: 20000 }}
       gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.45 }}
     >
-      <SunsetSky audioDataRef={audioDataRef} />
-      <Ocean audioDataRef={audioDataRef} />
-      <SunMesh audioDataRef={audioDataRef} onReady={setSunMesh} />
-      <SceneLighting audioDataRef={audioDataRef} />
-      <CloudLayer />
+      <SunsetSky analysisRef={analysisRef} />
+      <Ocean analysisRef={analysisRef} isPlaying={isPlaying} />
+      <SceneLighting analysisRef={analysisRef} />
+      <VolumetricClouds />
 
       <EffectComposer>
-        {sunMesh && (
-          <GodRays
-            sun={sunMesh}
-            blendFunction={BlendFunction.SCREEN}
-            samples={40}
-            density={0.97}
-            decay={0.94}
-            weight={0.4}
-            exposure={0.4}
-            clampMax={1}
-            kernelSize={KernelSize.SMALL}
-            blur
-          />
-        )}
-        <Bloom luminanceThreshold={1.0} luminanceSmoothing={0.3} intensity={0.8} radius={0.6} mipmapBlur />
+        <Bloom luminanceThreshold={1.1} luminanceSmoothing={0.4} intensity={0.4} radius={0.5} mipmapBlur />
       </EffectComposer>
     </Canvas>
   )

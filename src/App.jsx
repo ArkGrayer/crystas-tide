@@ -4,8 +4,17 @@ import FloatingPill from './features/player/FloatingPill'
 import OceanScene from './features/scene/OceanScene'
 
 export default function App() {
-  const { isPlaying, progress, bass, treble, loadFile, togglePlayPause, rewind, audioFile } =
-    useAudioAnalyser()
+  const {
+    isPlaying,
+    progress,
+    bass,
+    treble,
+    analysisRef,
+    loadFile,
+    togglePlayPause,
+    rewind,
+    audioFile,
+  } = useAudioAnalyser()
 
   const fileInputRef = useRef(null)
 
@@ -26,15 +35,10 @@ export default function App() {
 
   return (
     <div className="relative w-full min-h-dvh bg-surface overflow-hidden">
-      {/* 3D Ocean Background — reacts to audio data */}
-      <OceanScene
-        progress={progress}
-        bass={bass}
-        treble={treble}
-        isPlaying={isPlaying}
-      />
+      {/* 3D Ocean Background — reads from analysisRef directly (no re-renders) */}
+      <OceanScene analysisRef={analysisRef} isPlaying={isPlaying} />
 
-      {/* Debug overlay — real-time analysis data */}
+      {/* Debug overlay — uses throttled snapshot state (4x/s) */}
       {audioFile && (
         <div className="fixed top-8 right-8 z-50 font-mono text-xs text-white/40 space-y-2 select-none text-right">
           <p className="tracking-widest uppercase opacity-50 mb-1">Live Spectrum</p>
